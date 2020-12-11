@@ -1,15 +1,17 @@
 #include <MIDIUSB.h>
 
-struct Pad
+struct Sensor
 {
     int Pin;                    // Stands for analog port (0 = A0, 1 = A1, ...).
     int Note;                   // MIDI note.
     int CutOff;                 // Disallow hit values below this limit.
     bool UseVelocitySenstivity; // Specifies that velocity will be calculated based on hit value.
-    int HitValuePeak;           // Specifies a max value expected to be read by the piezo sensor. This value is used in velocity calculation.
+    int MaxHitValue;            // Specifies a max value expected to be read by the piezo sensor. This value is used in velocity calculation.
     int MinVelocity;            // Minimum velocity value that will be used in velocity calculation.
     int MaxVelocity;            // Maximum velocity value that will be used in velocity calculation.
     int MaxPlayTime;            // How many cycles to wait before allow a second hit.
+
+    bool Debug;
 
     bool IsActive;
     int PlayTime;
@@ -30,9 +32,9 @@ struct Pad
 
     void Normalize()
     {
-        if (HitValuePeak == 0 || HitValuePeak > 1023 || HitValuePeak < CutOff)
+        if (MaxHitValue == 0 || MaxHitValue > 1023 || MaxHitValue < CutOff)
         {
-            HitValuePeak = 1023;
+            MaxHitValue = 1023;
         }
 
         if (MinVelocity == 0)
@@ -57,7 +59,7 @@ struct Pad
 
         if (UseVelocitySenstivity)
         {
-            velocity = MaxVelocity / ((HitValuePeak - CutOff) / (hitValue - CutOff)); // With full range (Too sensitive ?)
+            velocity = MaxVelocity / ((MaxHitValue - CutOff) / (hitValue - CutOff));
 
             if (velocity < MinVelocity)
             {
@@ -73,8 +75,11 @@ struct Pad
             velocity = MaxVelocity;
         }
 
-        String message = (String) "Hit value: " + hitValue + ", Velocity: " + velocity;
-        Serial.println(message);
+        if (Debug)
+        {
+            String message = (String) "Hit value: " + hitValue + ", Velocity: " + velocity;
+            Serial.println(message);
+        }
 
         midiEventPacket_t noteOn = {0x09, 0x90 | 1, Note, velocity};
         MidiUSB.sendMIDI(noteOn);
