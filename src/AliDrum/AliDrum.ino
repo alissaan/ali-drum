@@ -1,12 +1,16 @@
 #include <MIDIUSB.h>
-#include <TaskScheduler.h>
 
 struct Sensor
 {
-    String Name;                // Name of sensor
-    int Pin;                    // Stands for analog port (0 = A0, 1 = A1, ...).
-    int Note;                   // MIDI note.
-    int Threshold;              // Disallow hit values below this limit.
+private:
+    String Name; // Name of sensor
+private:
+    int Port; // Stands for analog port (0 = A0, 1 = A1, ...).
+private:
+    int MidiKey; // MIDI key note.
+private:
+    int Threshold; // Disallow hit values below this limit.
+private:
     bool UseVelocitySenstivity; // Specifies that velocity will be calculated based on hit value.
 
 public:
@@ -15,11 +19,6 @@ public:
     int MinVelocity; // Minimum velocity value that will be used in velocity calculation.
 public:
     int MaxVelocity; // Maximum velocity value that will be used in velocity calculation.
-public:
-    int MaxPlayTime; // How many cycles to wait before allow a second hit.
-
-    int DecayCount;
-    unsigned long DecayTime;
 
 public:
     bool Debug;
@@ -27,37 +26,27 @@ public:
 public:
     int Value;
 
-    bool IsActive;
-    int PlayTime;
+private:
+    bool _isActive;
 
     int ScanTime = 2;
+    int MaskTime = 9;
 
-    bool LockDecay;
+private:
+    unsigned long _currentMaskTimeMark = 0;
+
+private:
+    int _rawThreshold = 0;
 
 public:
     Sensor(String name, int pin, int note, int threshold, bool useVelocitySensitity = true)
     {
         Name = name;
-        Pin = pin;
-        Note = note;
+        Port = pin;
+        MidiKey = note;
         Threshold = threshold;
         UseVelocitySenstivity = useVelocitySensitity;
         Value = 0;
-        DecayTime = 0;
-    }
-
-    void ControlPlaytime()
-    {
-        if (PlayTime >= MaxPlayTime)
-        {
-            IsActive = false;
-            PlayTime = 0;
-        }
-        else
-        {
-            IsActive = true;
-            PlayTime++;
-        }
     }
 
     void Normalize()
@@ -76,59 +65,44 @@ public:
         {
             MaxVelocity = 127;
         }
-
-        if (MaxPlayTime == 0)
-        {
-            MaxPlayTime = 90;
-        }
     }
 
-    void ShowParameters()
-    {
-        String message = (String)Name + " => Pin: " + Pin + ", Note: " + Note + ", CutOff: " + Threshold + ", UseVelocitySensitivy: " + UseVelocitySenstivity + ", MaxHitValue: " + MaxValue + ", MinVelocity: " + MinVelocity + ", MinVelocity: " + MaxVelocity + ", MaxPlayTime: " + MaxPlayTime + ", PlayTime: " + PlayTime;
-
-        Serial.println(message);
-    }
-
-    int RawThreshold = 0;
-    int LastValue = 0;
+    
 
     bool CheckHit()
     {
-        Value = analogRead(Pin);
+        Value = analogRead(Port);
 
         unsigned long scanMark = millis();
 
+        //Seeks to peak input value
         while (millis() - scanMark <= ScanTime)
         {
-            int dValue = analogRead(Pin);
+            int dValue = analogRead(Port);
             Value = dValue > Value ? dValue : Value;
         }
 
         if (Value > Threshold)
         {
-            if (!IsActive)
+            if (!_isActive)
             {
-                RawThreshold = Threshold;
-                Threshold = 2000;
-                IsActive = true;
-                PlayTime = 0;
+                _rawThreshold = Threshold;
+                Threshold = 2048; // Momentarily increases threshold helping prevent retriggering
+                _isActive = true;
+                _currentMaskTimeMark = millis();
                 return true;
             }
             else
             {
-                PlayTime++;
                 return false;
             }
         }
-        else if (IsActive)
+        else if (_isActive)
         {
-            PlayTime++;
-
-            if (PlayTime > MaxPlayTime)
+            if (millis() - _currentMaskTimeMark > MaskTime)
             {
-                Threshold = RawThreshold;
-                IsActive = false;
+                Threshold = _rawThreshold; // Returns to its default value
+                _isActive = false;
             }
 
             return false;
@@ -147,7 +121,7 @@ public:
             }
             else
             {
-                velocity = abs(MaxVelocity / abs((MaxValue - RawThreshold) / (Value - RawThreshold)));
+                velocity = abs(MaxVelocity / abs((MaxValue - _rawThreshold) / (Value - _rawThreshold)));
                 //velocity = map(Value, RawThreshold, MaxValue, 1, 127);
 
                 if (velocity < MinVelocity)
@@ -171,11 +145,12 @@ public:
             Serial.println(message);
         }
 
-        midiEventPacket_t noteOn = {0x09, 0x90 | 1, (uint8_t)Note, (uint8_t)velocity};
+        midiEventPacket_t noteOn = {0x09, 0x90 | 1, (uint8_t)MidiKey, (uint8_t)velocity};
         MidiUSB.sendMIDI(noteOn);
 
-        midiEventPacket_t noteOff = {0x08, 0x80 | 1, (uint8_t)Note, (uint8_t)0};
+        midiEventPacket_t noteOff = {0x08, 0x80 | 1, (uint8_t)MidiKey, (uint8_t)0};
         MidiUSB.sendMIDI(noteOff);
+
         MidiUSB.flush();
     }
 };
@@ -185,10 +160,6 @@ Sensor s1 = Sensor("S1", 0, 52, 200, true);
 void setup()
 {
     s1.Debug = true;
-    s1.MaxPlayTime = 60;
-    s1.IsActive = false;
-    s1.Value = 0;
-    s1.MaxValue = 1023;
     s1.MaxVelocity = 127;
     s1.MinVelocity = 1;
     s1.Normalize();
